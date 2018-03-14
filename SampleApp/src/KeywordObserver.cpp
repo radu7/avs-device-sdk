@@ -49,6 +49,10 @@ void KeywordObserver::onKeyWordDetected(
                 m_client->notifyOfWakeWord(m_audioProvider, beginIndex, endIndex, keyword);
             }
         }
+    } else {  //notifyOfTapToTalk will always help to identify the beginIndex
+        if (m_client) {
+            m_client->notifyOfTapToTalk(m_audioProvider);
+        }
     }
 }
 

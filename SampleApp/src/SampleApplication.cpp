@@ -20,8 +20,10 @@
 
 #ifdef KWD_KITTAI
 #include <KittAi/KittAiKeyWordDetector.h>
-#elif KWD_SENSORY
+#elif defined(KWD_SENSORY)
 #include <Sensory/SensoryKeywordDetector.h>
+#elif defined(KWD_RESPEAKERD)
+#include <respeakerd/RespeakerdKeyWordDetector.h>
 #endif
 
 #include <AVSCommon/AVS/Initialization/AlexaClientSDKInit.h>
@@ -489,6 +491,16 @@ bool SampleApplication::initialize(
         pathToInputFolder + "/spot-alexa-rpi-31000.snsr");
     if (!m_keywordDetector) {
         alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("Failed to create SensoryKeyWordDetector!");
+        return false;
+    }
+#elif defined(KWD_RESPEAKERD)
+    m_keywordDetector = kwd::RespeakerdKeyWordDetector::create(
+        sharedDataStream,
+        {keywordObserver},
+        std::unordered_set<
+            std::shared_ptr<alexaClientSDK::avsCommon::sdkInterfaces::KeyWordDetectorStateObserverInterface>>());
+    if (!m_keywordDetector) {
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("Failed to create RespeakerdKeyWordDetector!");
         return false;
     }
 #endif
