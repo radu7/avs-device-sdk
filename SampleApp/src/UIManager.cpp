@@ -76,7 +76,7 @@ static const std::string HELP_MESSAGE =
 #ifdef KWD
     "| Privacy mode (microphone off):                                             |\n"
     "|       Press 'm' and Enter to turn on and off the microphone.               |\n"
-    "| Echo Spatial Perception (ESP): This is only for testing purpose only!      |\n"
+    "| Echo Spatial Perception (ESP): This is for testing purpose only!           |\n"
     "|       Press 'e' followed by Enter at any time to adjust ESP settings.      |\n"
 #endif
     "| Playback Controls:                                                         |\n"
@@ -93,6 +93,11 @@ static const std::string HELP_MESSAGE =
     "|       firmware version.                                                    |\n"
     "| Info:                                                                      |\n"
     "|       Press 'i' followed by Enter at any time to see the help screen.      |\n"
+    "| Reset device:                                                              |\n"
+    "|       Press 'k' followed by Enter at any time to reset your device. This   |\n"
+    "|       will erase any data stored in the device and you will have to        |\n"
+    "|       register your device with another account.                           |\n"
+    "|       This will kill the application since we don't support login yet.     |\n"
     "| Quit:                                                                      |\n"
     "|       Press 'q' followed by Enter at any time to quit the application.     |\n"
     "+----------------------------------------------------------------------------+\n";
@@ -158,26 +163,20 @@ static const std::string ESP_CONTROL_MESSAGE =
     "| Press '3' followed by Enter to enter the ambient energy.                   |\n"
     "| Press 'q' to exit ESP Control Mode.                                        |\n";
 
-bool UIManager::initDbus()
-{
-    DBusError dbus_err;
-    // initialise the errors
-    dbus_error_init(&dbus_err);
-    // connect to the bus and check for errors
-    m_dbus_conn = dbus_bus_get(DBUS_BUS_SYSTEM, &dbus_err);
-    if (dbus_error_is_set(&dbus_err)) {
-        ACSDK_ERROR(LX("initFailed")
-                    .d("reason", "getDBusConnectionFailed")
-                    .d("detail reason", dbus_err.message));
-        dbus_error_free(&dbus_err);
-    }
-    if (!m_dbus_conn) {
-        ACSDK_ERROR(LX("initFailed").d("reason", "getDBusConnectionFailed-1"));
-        return false;
-    }
+static const std::string RESET_CONFIRMATION =
+    "+----------------------------------------------------------------------------+\n"
+    "|                    Device Reset Confirmation:                              |\n"
+    "|                                                                            |\n"
+    "| This operation will remove all your personal information, device settings, |\n"
+    "| and downloaded content. Are you sure you want to reset your device?        |\n"
+    "|                                                                            |\n"
+    "| Press 'Y' followed by Enter to reset the device.                           |\n"
+    "| Press 'N' followed by Enter to cancel the device reset operation.          |\n"
+    "+----------------------------------------------------------------------------+\n";
 
-    return true;
-}
+static const std::string RESET_WARNING =
+    "Device was reset! Please don't forget to deregister it. For more details "
+    "visit https://www.amazon.com/gp/help/customer/display.html?nodeId=201357520";
 
 void UIManager::onDialogUXStateChanged(DialogUXState state) {
     m_executor.submit([this, state]() {
@@ -296,6 +295,14 @@ void UIManager::microphoneOff() {
     m_executor.submit([]() { ConsolePrinter::prettyPrint("Microphone Off!"); });
 }
 
+void UIManager::printResetConfirmation() {
+    m_executor.submit([]() { ConsolePrinter::simplePrint(RESET_CONFIRMATION); });
+}
+
+void UIManager::printResetWarning() {
+    m_executor.submit([]() { ConsolePrinter::prettyPrint(RESET_WARNING); });
+}
+
 void UIManager::microphoneOn() {
     m_executor.submit([this]() { printState(); });
 }
@@ -331,6 +338,30 @@ void UIManager::printState() {
     }
 }
 
+/**
+ * SeeedStudio mod
+ */
+bool UIManager::initDbus()
+{
+    DBusError dbus_err;
+    // initialise the errors
+    dbus_error_init(&dbus_err);
+    // connect to the bus and check for errors
+    m_dbus_conn = dbus_bus_get(DBUS_BUS_SYSTEM, &dbus_err);
+    if (dbus_error_is_set(&dbus_err)) {
+        ACSDK_ERROR(LX("initFailed")
+                    .d("reason", "getDBusConnectionFailed")
+                    .d("detail reason", dbus_err.message));
+        dbus_error_free(&dbus_err);
+    }
+    if (!m_dbus_conn) {
+        ACSDK_ERROR(LX("initFailed").d("reason", "getDBusConnectionFailed-1"));
+        return false;
+    }
+
+    return true;
+}
+
 void UIManager::sendDbusSignal(const std::string signalName)
 {
     DBusMessage *msg;
@@ -358,6 +389,15 @@ void UIManager::sendDbusSignal(const std::string signalName)
 
     // free the message
     dbus_message_unref(msg);
+}
+
+void UIManager::printESPDataOverrideNotSupported()
+{
+    m_executor.submit([]() { ConsolePrinter::simplePrint("Cannot override ESP Value in this device."); });
+}
+
+void UIManager::printESPNotSupported() {
+    m_executor.submit([]() { ConsolePrinter::simplePrint("ESP is not supported in this device."); });
 }
 
 }  // namespace sampleApp

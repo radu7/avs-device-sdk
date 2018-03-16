@@ -26,6 +26,12 @@
 #include <respeakerd/RespeakerdKeyWordDetector.h>
 #endif
 
+#ifdef ENABLE_ESP
+#include <ESP/ESPDataProvider.h>
+#else
+#include <ESP/DummyESPDataProvider.h>
+#endif
+
 #include <AVSCommon/AVS/Initialization/AlexaClientSDKInit.h>
 #include <AVSCommon/Utils/Configuration/ConfigurationNode.h>
 #include <AVSCommon/Utils/LibcurlUtils/HTTPContentFetcherFactory.h>
@@ -75,6 +81,15 @@ static const std::string ENDPOINT_KEY("endpoint");
 /// Key for setting if display cards are supported or not under the @c SAMPLE_APP_CONFIG_KEY configuration node.
 static const std::string DISPLAY_CARD_KEY("displayCardsSupported");
 
+using namespace capabilityAgents::externalMediaPlayer;
+
+/// The @c m_playerToMediaPlayerMap Map of the adapter to their speaker-type and MediaPlayer creation methods.
+std::unordered_map<std::string, SampleApplication::SpeakerTypeAndCreateFunc>
+    SampleApplication::m_playerToMediaPlayerMap;
+
+/// The singleton map from @c playerId to @c ExternalMediaAdapter creation functions.
+std::unordered_map<std::string, ExternalMediaPlayer::AdapterCreateFunction> SampleApplication::m_adapterToCreateFuncMap;
+
 #ifdef KWD_KITTAI
 /// The sensitivity of the Kitt.ai engine.
 static const double KITT_AI_SENSITIVITY = 0.6;
@@ -123,9 +138,11 @@ static alexaClientSDK::avsCommon::utils::logger::Level getLogLevelFromUserInput(
  * @return true if the action for handling SIGPIPEs was correctly set to ignore, else false.
  */
 static bool ignoreSigpipeSignals() {
+#ifndef NO_SIGPIPE
     if (std::signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
         return false;
     }
+#endif
     return true;
 }
 
@@ -146,6 +163,31 @@ std::unique_ptr<SampleApplication> SampleApplication::create(
     return clientApplication;
 }
 
+SampleApplication::AdapterRegistration::AdapterRegistration(
+    const std::string& playerId,
+    ExternalMediaPlayer::AdapterCreateFunction createFunction) {
+    if (m_adapterToCreateFuncMap.find(playerId) != m_adapterToCreateFuncMap.end()) {
+        std::string errorStr = "WARNING:Adapter already exists for playerId " + playerId;
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint(errorStr);
+    }
+
+    m_adapterToCreateFuncMap[playerId] = createFunction;
+}
+
+SampleApplication::MediaPlayerRegistration::MediaPlayerRegistration(
+    const std::string& playerId,
+    avsCommon::sdkInterfaces::SpeakerInterface::Type speakerType,
+    MediaPlayerCreateFunction createFunction) {
+    if (m_playerToMediaPlayerMap.find(playerId) != m_playerToMediaPlayerMap.end()) {
+        std::string errorStr = "WARNING:MediaPlayer already exists for playerId " + playerId;
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint(errorStr);
+    }
+
+    m_playerToMediaPlayerMap[playerId] =
+        std::pair<avsCommon::sdkInterfaces::SpeakerInterface::Type, MediaPlayerCreateFunction>(
+            speakerType, createFunction);
+}
+
 void SampleApplication::run() {
     m_userInputManager->run();
 }
@@ -153,9 +195,10 @@ void SampleApplication::run() {
 SampleApplication::~SampleApplication() {
     // First clean up anything that depends on the the MediaPlayers.
     m_userInputManager.reset();
+    m_externalMusicProviderMediaPlayersMap.clear();
 
     // Now it's safe to shut down the MediaPlayers.
-    for (auto mediaPlayer : m_externalMusicProviderMediaPlayers) {
+    for (auto& mediaPlayer : m_adapterMediaPlayers) {
         mediaPlayer->shutdown();
     }
     if (m_speakMediaPlayer) {
@@ -170,6 +213,27 @@ SampleApplication::~SampleApplication() {
     if (m_notificationsMediaPlayer) {
         m_notificationsMediaPlayer->shutdown();
     }
+}
+
+bool SampleApplication::createMediaPlayersForAdapters(
+    std::shared_ptr<avsCommon::utils::libcurlUtils::HTTPContentFetcherFactory> httpContentFetcherFactory,
+    std::vector<std::shared_ptr<avsCommon::sdkInterfaces::SpeakerInterface>>& additionalSpeakers) {
+    for (auto& entry : m_playerToMediaPlayerMap) {
+        auto mediaPlayer =
+            entry.second.second(httpContentFetcherFactory, entry.second.first, entry.first + "MediaPlayer");
+        if (mediaPlayer) {
+            m_externalMusicProviderMediaPlayersMap[entry.first] = mediaPlayer;
+            additionalSpeakers.push_back(
+                std::static_pointer_cast<alexaClientSDK::avsCommon::sdkInterfaces::SpeakerInterface>(mediaPlayer));
+            m_adapterMediaPlayers.push_back(mediaPlayer);
+        } else {
+            std::string errorStr = "ERROR:Failed to create mediaPlayer for playerId " + entry.first;
+            alexaClientSDK::sampleApp::ConsolePrinter::simplePrint(errorStr);
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool SampleApplication::initialize(
@@ -220,9 +284,6 @@ bool SampleApplication::initialize(
     auto sampleAppConfig = config[SAMPLE_APP_CONFIG_KEY];
 
     auto httpContentFetcherFactory = std::make_shared<avsCommon::utils::libcurlUtils::HTTPContentFetcherFactory>();
-
-    std::unordered_map<std::string, std::shared_ptr<avsCommon::utils::mediaPlayer::MediaPlayerInterface>>
-        externalMusicProviderMediaPlayersMap;
 
     m_speakMediaPlayer = alexaClientSDK::mediaPlayer::MediaPlayer::create(
         httpContentFetcherFactory, avsCommon::sdkInterfaces::SpeakerInterface::Type::AVS_SYNCED, "SpeakMediaPlayer");
@@ -277,22 +338,30 @@ bool SampleApplication::initialize(
 
     std::vector<std::shared_ptr<avsCommon::sdkInterfaces::SpeakerInterface>> additionalSpeakers;
 
+    if (!createMediaPlayersForAdapters(httpContentFetcherFactory, additionalSpeakers)) {
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("ERROR: Could not create mediaPlayers for adapters");
+        return false;
+    }
+
     auto audioFactory = std::make_shared<alexaClientSDK::applicationUtilities::resources::audio::AudioFactory>();
 
     // Creating the alert storage object to be used for rendering and storing alerts.
     auto alertStorage =
-        std::make_shared<alexaClientSDK::capabilityAgents::alerts::storage::SQLiteAlertStorage>(audioFactory->alerts());
+        alexaClientSDK::capabilityAgents::alerts::storage::SQLiteAlertStorage::create(config, audioFactory->alerts());
+
+    // Creating the message storage object to be used for storing message to be sent later.
+    auto messageStorage = alexaClientSDK::certifiedSender::SQLiteMessageStorage::create(config);
 
     /*
      * Creating notifications storage object to be used for storing notification indicators.
      */
     auto notificationsStorage =
-        std::make_shared<alexaClientSDK::capabilityAgents::notifications::SQLiteNotificationsStorage>();
+        alexaClientSDK::capabilityAgents::notifications::SQLiteNotificationsStorage::create(config);
 
     /*
      * Creating settings storage object to be used for storing <key, value> pairs of AVS Settings.
      */
-    auto settingsStorage = std::make_shared<alexaClientSDK::capabilityAgents::settings::SQLiteSettingStorage>();
+    auto settingsStorage = alexaClientSDK::capabilityAgents::settings::SQLiteSettingStorage::create(config);
 
     /*
      * Creating the UI component that observes various components and prints to the console accordingly.
@@ -317,6 +386,11 @@ bool SampleApplication::initialize(
     std::shared_ptr<alexaClientSDK::authDelegate::AuthDelegate> authDelegate =
         alexaClientSDK::authDelegate::AuthDelegate::create();
 
+    if (!authDelegate) {
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("Creation of AuthDelegate failed!");
+        return false;
+    }
+
     authDelegate->addAuthObserver(connectionObserver);
 
     // INVALID_FIRMWARE_VERSION is passed to @c getInt() as a default in case FIRMWARE_VERSION_KEY is not found.
@@ -324,12 +398,20 @@ bool SampleApplication::initialize(
     sampleAppConfig.getInt(FIRMWARE_VERSION_KEY, &firmwareVersion, firmwareVersion);
 
     /*
+     * Check to see if displayCards is supported on the device. The default is supported unless specified otherwise in
+     * the configuration.
+     */
+    bool displayCardsSupported;
+    config[SAMPLE_APP_CONFIG_KEY].getBool(DISPLAY_CARD_KEY, &displayCardsSupported, true);
+
+    /*
      * Creating the DefaultClient - this component serves as an out-of-box default object that instantiates and "glues"
      * together all the modules.
      */
     std::shared_ptr<alexaClientSDK::defaultClient::DefaultClient> client =
         alexaClientSDK::defaultClient::DefaultClient::create(
-            externalMusicProviderMediaPlayersMap,
+            m_externalMusicProviderMediaPlayersMap,
+            m_adapterToCreateFuncMap,
             m_speakMediaPlayer,
             m_audioMediaPlayer,
             m_alertsMediaPlayer,
@@ -341,11 +423,13 @@ bool SampleApplication::initialize(
             additionalSpeakers,
             audioFactory,
             authDelegate,
-            alertStorage,
-            notificationsStorage,
-            settingsStorage,
+            std::move(alertStorage),
+            std::move(messageStorage),
+            std::move(notificationsStorage),
+            std::move(settingsStorage),
             {userInterfaceManager},
             {connectionObserver, userInterfaceManager},
+            displayCardsSupported,
             firmwareVersion,
             true,
             nullptr);
@@ -384,11 +468,8 @@ bool SampleApplication::initialize(
     client->addNotificationsObserver(userInterfaceManager);
 
     /*
-     * Add GUI Renderer as an observer if display cards are supported.  The default is supported unless specified
-     * otherwise in the configuration.
+     * Add GUI Renderer as an observer if display cards are supported.
      */
-    bool displayCardsSupported;
-    config[SAMPLE_APP_CONFIG_KEY].getBool(DISPLAY_CARD_KEY, &displayCardsSupported, true);
     if (displayCardsSupported) {
         auto guiRenderer = std::make_shared<GuiRenderer>();
         client->addTemplateRuntimeObserver(guiRenderer);
@@ -453,7 +534,6 @@ bool SampleApplication::initialize(
         alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("Failed to create PortAudioMicrophoneWrapper!");
         return false;
     }
-
 // Creating wake word audio provider, if necessary
 #ifdef KWD
     bool wakeAlwaysReadable = true;
@@ -468,8 +548,20 @@ bool SampleApplication::initialize(
         wakeCanOverride,
         wakeCanBeOverridden);
 
+#ifdef ENABLE_ESP
+    // Creating ESP connector
+    std::shared_ptr<esp::ESPDataProviderInterface> espProvider = esp::ESPDataProvider::create(wakeWordAudioProvider);
+    std::shared_ptr<esp::ESPDataModifierInterface> espModifier = nullptr;
+#else
+    // Create dummy ESP connector
+    auto dummyEspProvider = std::make_shared<esp::DummyESPDataProvider>();
+    std::shared_ptr<esp::ESPDataProviderInterface> espProvider = dummyEspProvider;
+    std::shared_ptr<esp::ESPDataModifierInterface> espModifier = dummyEspProvider;
+#endif
+
     // This observer is notified any time a keyword is detected and notifies the DefaultClient to start recognizing.
-    auto keywordObserver = std::make_shared<alexaClientSDK::sampleApp::KeywordObserver>(client, wakeWordAudioProvider);
+    auto keywordObserver =
+        std::make_shared<alexaClientSDK::sampleApp::KeywordObserver>(client, wakeWordAudioProvider, espProvider);
 
 #if defined(KWD_KITTAI)
     m_keywordDetector = alexaClientSDK::kwd::KittAiKeyWordDetector::create(
@@ -518,7 +610,8 @@ bool SampleApplication::initialize(
         holdToTalkAudioProvider,
         tapToTalkAudioProvider,
         wakeWordAudioProvider,
-        keywordObserver);
+        espProvider,
+        espModifier);
 
 #else
     // If wake word is not enabled, then creating the interaction manager without a wake word audio provider.

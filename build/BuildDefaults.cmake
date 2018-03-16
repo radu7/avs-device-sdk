@@ -37,3 +37,12 @@ include(TestOptions)
 find_package(PkgConfig)
 pkg_check_modules(DBUS REQUIRED dbus-1)
 
+# Setup platform dependant variables.
+include (Platforms)
+
+# Setup ESP variables.
+include (ESP)
+
+if (HAS_EXTERNAL_MEDIA_PLAYER_ADAPTERS)
+    include (ExternalMediaPlayerAdapters)
+endif()
