@@ -119,9 +119,10 @@ void RespeakerdKeyWordDetector::detectionLoop() {
 
     while (!m_isShuttingDown) {
         // block to wait until the bus can be read/write
-        bus_alive = dbus_connection_read_write(m_dbus_conn, -1);
+        bus_alive = dbus_connection_read_write(m_dbus_conn, 0);
         if (!bus_alive) {
             notifyKeyWordDetectorStateObservers(KeyWordDetectorStateObserverInterface::KeyWordDetectorState::ERROR);
+            ACSDK_ERROR(LX("readWriteFailed").d("reason", "bus_alive == FALSE"));
             break;
         }
         msg = dbus_connection_pop_message(m_dbus_conn);
@@ -133,6 +134,9 @@ void RespeakerdKeyWordDetector::detectionLoop() {
                     KeyWordObserverInterface::UNSPECIFIED_INDEX,
                     KeyWordObserverInterface::UNSPECIFIED_INDEX);
             }
+            dbus_message_unref(msg);
+        } else {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 }

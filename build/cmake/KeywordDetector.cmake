@@ -63,10 +63,6 @@ endif()
 
 if(RESPEAKERD_KEY_WORD_DETECTOR)
     message("Creating ${PROJECT_NAME} with keyword detector type: respeakerd")
-
-    find_package(PkgConfig)
-    pkg_check_modules(DBUS REQUIRED dbus-1)
-
     add_definitions(-DKWD)
     add_definitions(-DKWD_RESPEAKERD)
 endif()

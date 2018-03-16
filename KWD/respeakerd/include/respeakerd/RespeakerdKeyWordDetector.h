@@ -116,8 +116,6 @@ private:
     std::thread m_detectionThread;
 
     DBusConnection *m_dbus_conn;
-
-
 };
 
 }  // namespace kwd

@@ -16,6 +16,8 @@
 #ifndef ALEXA_CLIENT_SDK_SAMPLEAPP_INCLUDE_SAMPLEAPP_UIMANAGER_H_
 #define ALEXA_CLIENT_SDK_SAMPLEAPP_INCLUDE_SAMPLEAPP_UIMANAGER_H_
 
+#include <dbus/dbus.h>
+
 #include <AVSCommon/SDKInterfaces/DialogUXStateObserverInterface.h>
 #include <AVSCommon/SDKInterfaces/ConnectionStatusObserverInterface.h>
 #include <AVSCommon/SDKInterfaces/AuthObserverInterface.h>
@@ -39,6 +41,8 @@ class UIManager
         , public avsCommon::sdkInterfaces::SpeakerManagerObserverInterface
         , public avsCommon::sdkInterfaces::NotificationsObserverInterface {
 public:
+    bool initDbus();
+
     void onDialogUXStateChanged(DialogUXState state) override;
 
     void onConnectionStatusChanged(const Status status, const ChangedReason reason) override;
@@ -120,6 +124,8 @@ private:
      */
     void printState();
 
+    void sendDbusSignal(const std::string signalName);
+
     /// The current dialog UX state of the SDK
     DialogUXState m_dialogState;
 
@@ -128,6 +134,8 @@ private:
 
     /// An internal executor that performs execution of callable objects passed to it sequentially but asynchronously.
     avsCommon::utils::threading::Executor m_executor;
+
+    DBusConnection *m_dbus_conn;
 };
 
 }  // namespace sampleApp

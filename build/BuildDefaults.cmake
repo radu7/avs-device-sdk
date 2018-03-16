@@ -32,3 +32,8 @@ include(PortAudio)
 
 # Setup Test Options variables.
 include(TestOptions)
+
+# SeeedStudio mod
+find_package(PkgConfig)
+pkg_check_modules(DBUS REQUIRED dbus-1)
+

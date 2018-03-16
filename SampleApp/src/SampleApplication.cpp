@@ -299,6 +299,11 @@ bool SampleApplication::initialize(
      */
     auto userInterfaceManager = std::make_shared<alexaClientSDK::sampleApp::UIManager>();
 
+    if (!userInterfaceManager->initDbus()) {
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("Failed to initialize D-Bus for UIManager!");
+        return false;
+    }
+
     /*
      * Setting up a connection observer to wait for connection and authorization prior to accepting user input at
      * startup.
