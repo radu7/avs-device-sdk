@@ -46,7 +46,8 @@ public:
     static std::unique_ptr<SampleApplication> create(
         const std::string& pathToConfig,
         const std::string& pathToInputFolder,
-        const std::string& logLevel = "");
+        const std::string& logLevel = "",
+        const std::string& disableStdin = "");
 
     /// Runs the application, blocking until the user asks the application to quit.
     void run();
@@ -125,7 +126,8 @@ private:
      *     logging level will be used.
      * @return @c true if initialization succeeded, else @c false.
      */
-    bool initialize(const std::string& pathToConfig, const std::string& pathToInputFolder, const std::string& logLevel);
+    bool initialize(const std::string& pathToConfig, const std::string& pathToInputFolder, const std::string& logLevel,
+                    const std::string& disableStdin);
 
     /// The @c UserInputManager which controls the client.
     std::unique_ptr<UserInputManager> m_userInputManager;
@@ -162,6 +164,8 @@ private:
     /// The Wakeword Detector which can wake up the client using audio input.
     std::unique_ptr<kwd::AbstractKeywordDetector> m_keywordDetector;
 #endif
+
+    bool m_disableStdin;
 };
 
 }  // namespace sampleApp

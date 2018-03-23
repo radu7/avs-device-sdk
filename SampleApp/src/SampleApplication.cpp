@@ -81,6 +81,8 @@ static const std::string ENDPOINT_KEY("endpoint");
 /// Key for setting if display cards are supported or not under the @c SAMPLE_APP_CONFIG_KEY configuration node.
 static const std::string DISPLAY_CARD_KEY("displayCardsSupported");
 
+static const std::string DISABLE_STDIN_KEY("disableStdin");
+
 using namespace capabilityAgents::externalMediaPlayer;
 
 /// The @c m_playerToMediaPlayerMap Map of the adapter to their speaker-type and MediaPlayer creation methods.
@@ -149,9 +151,10 @@ static bool ignoreSigpipeSignals() {
 std::unique_ptr<SampleApplication> SampleApplication::create(
     const std::string& pathToConfig,
     const std::string& pathToInputFolder,
-    const std::string& logLevel) {
+    const std::string& logLevel,
+    const std::string& disableStdin) {
     auto clientApplication = std::unique_ptr<SampleApplication>(new SampleApplication);
-    if (!clientApplication->initialize(pathToConfig, pathToInputFolder, logLevel)) {
+    if (!clientApplication->initialize(pathToConfig, pathToInputFolder, logLevel, disableStdin)) {
         ConsolePrinter::simplePrint("Failed to initialize SampleApplication");
         return nullptr;
     }
@@ -189,7 +192,13 @@ SampleApplication::MediaPlayerRegistration::MediaPlayerRegistration(
 }
 
 void SampleApplication::run() {
-    m_userInputManager->run();
+    if (m_disableStdin) {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    } else {
+        m_userInputManager->run();
+    }
 }
 
 SampleApplication::~SampleApplication() {
@@ -239,7 +248,8 @@ bool SampleApplication::createMediaPlayersForAdapters(
 bool SampleApplication::initialize(
     const std::string& pathToConfig,
     const std::string& pathToInputFolder,
-    const std::string& logLevel) {
+    const std::string& logLevel,
+    const std::string& disableStdin) {
     /*
      * Set up the SDK logging system to write to the SampleApp's ConsolePrinter.  Also adjust the logging level
      * if requested.
@@ -620,6 +630,18 @@ bool SampleApplication::initialize(
 #endif
 
     client->addAlexaDialogStateObserver(interactionManager);
+
+    // seeed mod
+    sampleAppConfig.getBool(DISABLE_STDIN_KEY, &m_disableStdin, false);
+
+    if (disableStdin.find(DISABLE_STDIN_KEY) != std::string::npos) {
+        m_disableStdin = true;
+    }
+
+    if (m_disableStdin) {
+        alexaClientSDK::sampleApp::ConsolePrinter::simplePrint("run without stdin.");
+        return true;
+    }
 
     // Creating the input observer.
     m_userInputManager = alexaClientSDK::sampleApp::UserInputManager::create(interactionManager);

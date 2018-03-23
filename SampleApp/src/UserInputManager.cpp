@@ -74,6 +74,7 @@ void UserInputManager::run() {
     while (true) {
         char x;
         std::cin >> x;
+        std::cout << "cin: " << (int)x << std::endl;
         x = ::tolower(x);
         if (x == QUIT) {
             m_interactionManager->shutdown();
